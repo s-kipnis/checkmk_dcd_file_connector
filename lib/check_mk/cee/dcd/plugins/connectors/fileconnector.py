@@ -41,33 +41,31 @@ import time
 from abc import ABC, abstractmethod
 from functools import partial, wraps
 from itertools import zip_longest
+from typing import Dict, Iterable, List, Optional, Set, Tuple  # pylint: disable=unused-import
 
-from typing import (  # pylint: disable=unused-import
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Set,
-    Tuple,
+from cmk.ccc.i18n import _  # pylint: disable=import-error
+
+from cmk.cee.dcd.connector_backend import (
+    Connector,
+    connector_registry,
+    ConnectorObject,
+    NullObject,
+    Phase1Result,
 )
-
-from cmk.utils.i18n import _  # pylint: disable=import-error
-
-from cmk.cee.dcd.web_api import MKAPIError  # pylint: disable=import-error
-
-from cmk.cee.dcd.plugins.connectors.connectors_api.v1 import (  # noqa: F401 # pylint: disable=unused-import,import-error
+from cmk.cee.dcd.config import (  # noqa: F401 # pylint: disable=unused-import,import-error
     connector_config_registry,
     ConnectorConfig,
-    connector_registry,
-    Connector,
-    Phase1Result,
-    NullObject,
 )
+
+
+from cmk.cee.dcd.site_api import MKAPIError  # pylint: disable=import-error
+from cmk.utils.global_ident_type import GlobalIdent
 
 try:
     from functools import cache  # pylint: disable=ungrouped-imports
 except ImportError:
     from functools import lru_cache
+
     cache = lru_cache(maxsize=None)
 
 BUILTIN_ATTRIBUTES = {"locked_by", "labels", "meta_data"}
@@ -84,7 +82,7 @@ def normalize_hostname(hostname: str) -> str:
 
 
 @cache
-def sanitise_str(value) -> str:
+def sanitise_str(value) -> str:  # type: ignore[no-untyped-def]
     "Remove characters that can cause trouble with REST API"
     for char in REPLACABLE_CHARS:
         value = value.replace(char, REPLACEMENT_CHAR)
@@ -105,8 +103,9 @@ def get_host_label(host: Dict[str, str], hostname_field: str) -> Dict[str, str]:
             return value[6:]
 
         return value
-# more logic, so no dict comprehension for readability
-# tmp = {key.lower(): value for key, value in host.items() if key != hostname_field}
+
+    # more logic, so no dict comprehension for readability
+    # tmp = {key.lower(): value for key, value in host.items() if key != hostname_field}
 
     tmp = {}
     for key, value in host.items():
@@ -149,7 +148,7 @@ def get_host_attributes(host: Dict[str, str]) -> Dict[str, str]:
     }
 
 
-def is_attribute(string: str) -> str:
+def is_attribute(string: str) -> bool:
     "Checks if a field is marked as attribute."
     return string.lower().startswith("attr_")
 
@@ -170,6 +169,8 @@ def get_ip_address(host: Dict[str, str]) -> Optional[str]:
 
         return ip_address.strip()
 
+    return None
+
 
 def fields_contain_ip_addresses(fields: List[str]) -> bool:
     "Do these fields contain IP address fields?"
@@ -185,7 +186,7 @@ def get_host_tags(attributes: Dict[str, str]) -> Dict[str, str]:
     return {attr: value for attr, value in attributes.items() if is_tag(attr)}
 
 
-def is_tag(name: str) -> str:
+def is_tag(name: str) -> bool:
     """
     Is the name a 'tag'?
 
@@ -202,10 +203,7 @@ def create_hostlike_tags(tags_from_cmk: dict) -> Dict[str, List[str]]:
 
     Tags at a host are prefixed with 'tag_'
     """
-    return {
-        "tag_" + tag["id"]: [choice["id"] for choice in tag["tags"]]
-        for tag in tags_from_cmk
-    }
+    return {"tag_" + tag["id"]: [choice["id"] for choice in tag["tags"]] for tag in tags_from_cmk}
 
 
 @connector_config_registry.register
@@ -233,24 +231,46 @@ class FileConnectorConfig(ConnectorConfig):  # pylint: disable=too-few-public-me
             "label_prefix": self.label_prefix,
         }
 
-    def _connector_attributes_from_config(self, connector_cfg: dict):
-        self.interval: int = connector_cfg["interval"]  # pylint: disable=attribute-defined-outside-init
+    def _connector_attributes_from_config(self, connector_cfg: dict) -> None:
+        self.interval: int = connector_cfg[
+            "interval"
+        ]  # pylint: disable=attribute-defined-outside-init
         self.path: str = connector_cfg["path"]  # pylint: disable=attribute-defined-outside-init
-        self.file_format: str = connector_cfg.get("file_format", "csv")  # pylint: disable=attribute-defined-outside-init
+        self.file_format: str = connector_cfg.get(
+            "file_format", "csv"
+        )  # pylint: disable=attribute-defined-outside-init
         self.folder: str = connector_cfg["folder"]  # pylint: disable=attribute-defined-outside-init
-        self.lowercase_everything: bool = connector_cfg.get("lowercase_everything", False)  # pylint: disable=attribute-defined-outside-init
-        self.replace_special_chars: bool = connector_cfg.get("replace_special_chars", False)  # pylint: disable=attribute-defined-outside-init
-        self.host_filters: List[str] = connector_cfg.get("host_filters", [])  # pylint: disable=attribute-defined-outside-init
-        self.host_overtake_filters: List[str] = connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
-            "host_overtake_filters", []
+        self.lowercase_everything: bool = connector_cfg.get(
+            "lowercase_everything", False
+        )  # pylint: disable=attribute-defined-outside-init
+        self.replace_special_chars: bool = connector_cfg.get(
+            "replace_special_chars", False
+        )  # pylint: disable=attribute-defined-outside-init
+        self.host_filters: List[str] = connector_cfg.get(
+            "host_filters", []
+        )  # pylint: disable=attribute-defined-outside-init
+        self.host_overtake_filters: List[str] = (
+            connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
+                "host_overtake_filters", []
+            )
         )
-        self.chunk_size: int = connector_cfg.get("chunk_size", 0)  # pylint: disable=attribute-defined-outside-init
-        self.use_service_discovery: bool = connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
-            "use_service_discovery", True
+        self.chunk_size: int = connector_cfg.get(
+            "chunk_size", 0
+        )  # pylint: disable=attribute-defined-outside-init
+        self.use_service_discovery: bool = (
+            connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
+                "use_service_discovery", True
+            )
         )
-        self.label_path_template: str = connector_cfg.get("label_path_template", "")  # pylint: disable=attribute-defined-outside-init
-        self.csv_delimiter: Optional[str] = connector_cfg.get("csv_delimiter")  # pylint: disable=attribute-defined-outside-init
-        self.label_prefix: Optional[str] = connector_cfg.get("label_prefix")  # pylint: disable=attribute-defined-outside-init
+        self.label_path_template: str = connector_cfg.get(
+            "label_path_template", ""
+        )  # pylint: disable=attribute-defined-outside-init
+        self.csv_delimiter: Optional[str] = connector_cfg.get(
+            "csv_delimiter"
+        )  # pylint: disable=attribute-defined-outside-init
+        self.label_prefix: Optional[str] = connector_cfg.get(
+            "label_prefix"
+        )  # pylint: disable=attribute-defined-outside-init
 
 
 class FileImporter(ABC):  # pylint: disable=too-few-public-methods
@@ -258,7 +278,7 @@ class FileImporter(ABC):  # pylint: disable=too-few-public-methods
 
     def __init__(self, filepath: str):
         self.filepath = filepath
-        self.hosts: Optional[dict] = None
+        self.hosts: Optional[list] = None
         self.fields: Optional[List[str]] = None
         self.hostname_field: Optional[str] = None
 
@@ -270,7 +290,7 @@ class FileImporter(ABC):  # pylint: disable=too-few-public-methods
 class CSVImporter(FileImporter):  # pylint: disable=too-few-public-methods
     "Import hosts from a CSV file"
 
-    def __init__(self, filepath: str, delimiter: str = None):
+    def __init__(self, filepath: str, delimiter: str | None = None):
         super().__init__(filepath)
 
         self.delimiter = delimiter
@@ -283,11 +303,12 @@ class CSVImporter(FileImporter):  # pylint: disable=too-few-public-methods
                 reader = csv.DictReader(cmdb_export)
 
             self.hosts = list(reader)
-            self.fields = reader.fieldnames
+            self.fields = reader.fieldnames  # type: ignore[assignment]
 
         try:
             # We always assume that the first column in our CSV is the hostname
-            self.hostname_field = self.fields[0]
+            if self.fields is not None:
+                self.hostname_field = self.fields[0]
         except IndexError:
             # Handling the error will be done in the calling method
             pass
@@ -306,10 +327,11 @@ class JSONImporter(FileImporter):  # pylint: disable=too-few-public-methods
             self.hosts = json.load(export_file)
 
         fields = set()
-        for host in self.hosts:
-            fields.update(host.keys())
+        if self.hosts is not None:
+            for host in self.hosts:
+                fields.update(host.keys())
 
-        self.fields = fields
+        self.fields = list(fields)
 
         possible_hostname_fields = self.EXPECTED_HOST_NAMES + list(IP_ATTRIBUTES)
         for field in possible_hostname_fields:
@@ -349,10 +371,10 @@ class BVQImporter(FileImporter):
         for host in self.hosts:
             fields.update(host.keys())
 
-        self.fields = fields
+        self.fields = list(fields)
 
     @classmethod
-    def format_host(cls, host: dict):
+    def format_host(cls, host: dict):  # type: ignore[no-untyped-def]
         "Get a host object formatted as required for further processing"
         # BVQ sends more fields than we handle.
         # We currently exclude:
@@ -515,11 +537,11 @@ class BaseApiClient(ABC):
         """
 
     @abstractmethod
-    def delete_hosts(self, hosts: List[dict]):
+    def delete_hosts(self, hosts: List[dict]):  # type: ignore[no-untyped-def]
         "Delete existing hosts"
 
     @abstractmethod
-    def move_host(self, host: str, path: str):
+    def move_host(self, host: str, path: str):  # type: ignore[no-untyped-def]
         "Move an existing host to a new path"
 
     @abstractmethod
@@ -532,7 +554,7 @@ class BaseApiClient(ABC):
         """
 
     @abstractmethod
-    def discover_services(self, hostnames: List[str]):
+    def discover_services(self, hostnames: List[str]):  # type: ignore[no-untyped-def]
         "Trigger a service discovery on the given hosts"
 
     @abstractmethod
@@ -560,7 +582,7 @@ class BaseApiClient(ABC):
         "Retrieve existing folders"
 
     @abstractmethod
-    def add_folder(self, folder: str):
+    def add_folder(self, folder: str):  # type: ignore[no-untyped-def]
         "Add new folder"
 
 
@@ -599,7 +621,7 @@ class HttpApiClient(BaseApiClient):
 
         return cleaned_hosts
 
-    def delete_hosts(self, hosts: List[dict]):
+    def delete_hosts(self, hosts: List[dict]) -> None:
         self._api_client.delete_hosts(hosts)
 
     def get_host_tags(self) -> List[dict]:
@@ -618,7 +640,7 @@ class HttpApiClient(BaseApiClient):
 
         return all_tags
 
-    def discover_services(self, hostnames: List[str]):
+    def discover_services(self, hostnames: List[str]) -> None:
         self._api_client.bulk_discovery_start(hostnames)
 
     def is_discovery_running(self) -> bool:
@@ -645,7 +667,7 @@ class HttpApiClient(BaseApiClient):
         )
         return set(all_folders)
 
-    def add_folder(self, folder: str):
+    def add_folder(self, folder: str):  # type: ignore[no-untyped-def]
         # Follow the required format for the request.
         folder_data = {"folder": folder, "attributes": {}}
         data = {"request": json.dumps(folder_data)}
@@ -692,9 +714,7 @@ class RestApiClient(HttpApiClient):
         Returns a tuple with version information.
         For example `1.2.3p4` will return `(1, 2, 3, 4)`.
         """
-        response = self._api_client._session.get(  # pylint: disable=protected-access
-            "/version"
-        )
+        response = self._api_client._session.get("/version")  # pylint: disable=protected-access
         json_response = response.json()
 
         checkmk_version = json_response["versions"]["checkmk"]
@@ -757,7 +777,7 @@ class RestApiClient(HttpApiClient):
         the second value contains the error message.
         """
 
-        def get_host_etag(self, host: str):
+        def get_host_etag(self, host: str):  # type: ignore[no-untyped-def]
             response = self._api_client._session.get(  # pylint: disable=protected-access
                 f"/objects/host_config/{host}",
             )
@@ -769,13 +789,8 @@ class RestApiClient(HttpApiClient):
 
         response = self._api_client._session.post(  # pylint: disable=protected-access
             f"/objects/host_config/{host}/actions/move/invoke",
-            headers={
-                "If-Match": f'{etag}',
-                "Content-Type": "application/json"
-            },
-            json={
-                "target_folder": folder
-            }
+            headers={"If-Match": f"{etag}", "Content-Type": "application/json"},
+            json={"target_folder": folder},
         )
 
         if response.status_code < 400:
@@ -799,7 +814,7 @@ class RestApiClient(HttpApiClient):
 
         return set(all_folders)
 
-    def add_folder(self, folder: str):
+    def add_folder(self, folder: str) -> None:
         path, folder_name = folder.rsplit(PATH_SEPERATOR, 1)
         parent_path = self.prefix_path(path)
 
@@ -884,7 +899,7 @@ class Chunker:
 
         @wraps(function)
         def wrap_function(parameter):
-            returned_values = {}
+            returned_values: dict = {}
             for chunk in self.chunks(parameter, self._chunk_size):
                 single_call_return = function([c for c in chunk if c])
 
@@ -933,7 +948,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
 
         importer = self._get_importer()
         importer.import_hosts()
-        self._logger.info("Found %i hosts in file", len(importer.hosts))
+        self._logger.info("Found %i hosts in file", len(importer.hosts))  # type: ignore[arg-type]
 
         if not importer.fields:
             self._logger.error(
@@ -949,10 +964,9 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             )
             raise RuntimeError("Unable to detect hostname field")
 
+        assert importer.hosts is not None
         return Phase1Result(
-            FileConnectorHosts(
-                importer.hosts, importer.hostname_field, importer.fields
-            ),
+            FileConnectorHosts(importer.hosts, importer.hostname_field, importer.fields),
             self._status,
         )
 
@@ -960,7 +974,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
         "Get the correct importer based on the current config."
         file_format = self._connection_config.file_format
         if file_format == "csv":
-            importer = CSVImporter(
+            importer: FileImporter = CSVImporter(
                 self._connection_config.path, self._connection_config.csv_delimiter
             )
         elif file_format == "bvq":
@@ -972,24 +986,22 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
 
         if self._connection_config.lowercase_everything:
             self._logger.info("All imported values will be lowercased")
-            importer = LowercaseImporter(importer)
+            importer = LowercaseImporter(importer)  # type: ignore[assignment]
 
         if self._connection_config.replace_special_chars:
             self._logger.info("All imported values will have their values santized")
-            importer = SanitisingImporter(importer)
+            importer = SanitisingImporter(importer)  # type: ignore[assignment]
 
         return importer
 
-    def _execute_phase2(self, phase1_result: Phase1Result):
+    def _execute_phase2(self, phase1_result: Phase1Result):  # type: ignore[no-untyped-def]
         """Execute the second synchronization phase
 
         It is executed based on the information provided by the first phase. This
         phase is intended to talk to the local WATO Web API for updating the
         Check_MK configuration based on the information provided by the connection.
         """
-        with self.status.next_step(
-            "phase2_extract_result", _("Phase 2.1: Extracting result")
-        ):
+        with self.status.next_step("phase2_extract_result", _("Phase 2.1: Extracting result")):
             if isinstance(phase1_result.connector_object, NullObject):
                 raise ValueError("Remote site has not completed phase 1 yet")
 
@@ -1006,10 +1018,10 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                 phase1_result.connector_object.fieldnames
             )
 
-        with self.status.next_step(
-            "phase2_fetch_hosts", _("Phase 2.2: Fetching existing hosts")
-        ):
-            self._api_client = self._get_api_client()  # pylint: disable=attribute-defined-outside-init
+        with self.status.next_step("phase2_fetch_hosts", _("Phase 2.2: Fetching existing hosts")):
+            self._api_client = (
+                self._get_api_client()
+            )  # pylint: disable=attribute-defined-outside-init
 
             cmk_hosts = self._api_client.get_hosts()
 
@@ -1027,9 +1039,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                         "Tag sync disabled."
                     )
 
-        with self.status.next_step(
-            "phase2_update", _("Phase 2.3: Updating config")
-        ) as step:
+        with self.status.next_step("phase2_update", _("Phase 2.3: Updating config")) as step:
             hosts_changed, change_message = self._update_config(
                 cmdb_hosts,
                 cmk_hosts,
@@ -1040,9 +1050,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             self._logger.info(change_message)
             step.finish(change_message)
 
-        with self.status.next_step(
-            "phase2_activate", _("Phase 2.4: Activating changes")
-        ) as step:
+        with self.status.next_step("phase2_activate", _("Phase 2.4: Activating changes")) as step:
             if hosts_changed and self._api_client.requires_activation:
                 if self._activate_changes():
                     step.finish(_("Activated the changes"))
@@ -1060,7 +1068,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
         # import inspect
         # self._logger.info("Sig: {}".format(inspect.getargspec(self._web_api._api_request)))
 
-        def is_http_client(dcd_client) -> bool:
+        def is_http_client(dcd_client) -> bool:  # type: ignore[no-untyped-def]
             "Checking if the client is for the HTTP API implementation"
 
             # Attributes only present at old client:
@@ -1072,26 +1080,26 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
 
             return False
 
-        if is_http_client(self._web_api):
+        if is_http_client(self._client):
             self._logger.debug("Creating a HttpApiClient")
-            api_client = HttpApiClient(self._web_api)
+            api_client = HttpApiClient(self._client)
         else:
             self._logger.debug("Creating a RestApiClient")
-            api_client = RestApiClient(self._web_api)
+            api_client = RestApiClient(self._client)
 
         chunk_size = self._connection_config.chunk_size
         if chunk_size:
             self._logger.info("Processing in chunks of %i", chunk_size)
-            api_client = Chunker(api_client, chunk_size)
+            api_client = Chunker(api_client, chunk_size)  # type: ignore[assignment]
 
         return api_client
 
-    def _update_config(
+    def _update_config(  # type: ignore[no-untyped-def]
         self, cmdb_hosts, cmk_hosts, hostname_field, cmk_tags, update_ips: bool = False
     ):
         hosts_to_create, hosts_to_modify, hosts_to_delete, hosts_to_move = self._partition_hosts(
             cmdb_hosts, cmk_hosts, hostname_field, cmk_tags, update_ips
-        )
+        )  # type: ignore[misc]
 
         if self._connection_config.label_path_template:
             # Creating possibly missing folders if we rely on
@@ -1108,10 +1116,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             created_host_names or modified_host_names or deleted_host_names or moved_host_names
         )
         change_message = self._get_change_message(
-            created_host_names,
-            modified_host_names,
-            deleted_host_names,
-            moved_host_names
+            created_host_names, modified_host_names, deleted_host_names, moved_host_names
         )
 
         return changes_to_hosts, change_message
@@ -1165,9 +1170,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                 self._logger.debug("Marking host %r for takeover", host_name)
                 hosts_to_overtake.add(host_name)
             else:
-                self._logger.debug(
-                    "Host %r already exists as an unrelated host", host_name
-                )
+                self._logger.debug("Host %r already exists as an unrelated host", host_name)
                 unrelated_hosts.add(host_name)
 
         self._logger.info(
@@ -1232,19 +1235,14 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             """
             return {
                 key: value
-                for key, value
-                in host.items()
+                for key, value in host.items()
                 if not (key in BUILTIN_ATTRIBUTES or is_tag(key))
             }
 
         if self._connection_config.label_path_template:
-            path_labels = self._connection_config.label_path_template.split(
-                PATH_SEPERATOR
-            )
+            path_labels = self._connection_config.label_path_template.split(PATH_SEPERATOR)
 
-            def get_dynamic_folder_path(
-                labels: dict, keys: List[str], depth: int
-            ) -> str:
+            def get_dynamic_folder_path(labels: dict, keys: List[str], depth: int) -> str:
                 def replace_special_chars(string: str) -> str:
                     return string.replace(" ", "_")
 
@@ -1254,7 +1252,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                     # folder we have '' as value. We do not want to
                     # add it because it disturbs CMKs path processing.
                     path.insert(0, self._connection_config.folder)
-                path = (replace_special_chars(p) for p in path)
+                path = (replace_special_chars(p) for p in path)  # type: ignore[assignment]
                 return PATH_SEPERATOR.join(path)
 
             get_folder_path = partial(
@@ -1262,31 +1260,31 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             )
         else:
             # Keeping the signature of the more complex function
-            def get_folder_path(_) -> str:
+            def get_folder_path(_) -> str:  # type: ignore[no-untyped-def,misc]
                 return self._connection_config.folder
 
         def get_host_creation_tuple(
             host: dict,
             hostname_field: str,
-            global_ident: str,
+            global_ident: GlobalIdent,
             label_prefix: Optional[str] = None,
         ) -> Tuple[str, str, dict]:
             labels = get_host_label(host, hostname_field)
             folder_path = get_folder_path(labels)
             prefixed_labels = add_prefix_to_labels(labels, label_prefix)
 
-            attributes = {
+            attributes: dict[str, object] = {
                 "labels": prefixed_labels,
                 # Lock the host in order to be able to detect hosts
                 # that have been created through this plugin.
                 "locked_by": global_ident,
             }
 
-            ip_address = get_ip_address(host)
+            ip_address: str | None = get_ip_address(host)
             if ip_address is not None:
                 attributes["ipaddress"] = ip_address
 
-            if tag_matcher:
+            if tag_matcher is not None:
                 tags = create_host_tags(get_host_tags(host))
                 attributes.update(tags)
 
@@ -1313,7 +1311,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             if folder_path != absolute_future_folder_path:
                 self._logger.debug("Folder paths require update")
                 return (hostname, future_folder_path)
-            return tuple()
+            return tuple()  # type: ignore[return-value]
 
         def get_host_modification_tuple(
             existing_host: dict,
@@ -1337,13 +1335,10 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                 # We only manage labels that match our prefix
                 unmodified_api_label = api_label.copy()
                 api_label = {
-                    key: value
-                    for key, value
-                    in api_label.items()
-                    if key.startswith(label_prefix)
+                    key: value for key, value in api_label.items() if key.startswith(label_prefix)
                 }
 
-            if tag_matcher:
+            if tag_matcher is not None:
                 api_tags = get_host_tags(attributes)
                 host_tags = get_host_tags(cmdb_host)
                 future_tags = create_host_tags(host_tags)
@@ -1366,7 +1361,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                     self._logger.debug("Labels require update")
                     return True
 
-                if tag_matcher and needs_modification(api_tags, future_tags):
+                if tag_matcher is not None and needs_modification(api_tags, future_tags):
                     self._logger.debug("Tags require update")
                     return True
 
@@ -1392,7 +1387,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                     else:
                         attributes["ipaddress"] = future_ip
 
-                if tag_matcher:
+                if tag_matcher is not None:
                     attributes.update(future_tags)
 
                 attributes.update(future_attributes)
@@ -1413,7 +1408,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
 
                 return (hostname, attributes, attributes_to_unset)
 
-            return tuple()  # For consistent return type
+            return tuple()  # type: ignore[return-value]
 
         tag_matcher = TagMatcher(cmk_tags) if cmk_tags is not None else None
         hosts_to_create = []
@@ -1451,17 +1446,11 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                 hosts_to_modify.append(host_modifications)
 
             self._logger.debug("Checking folder of managed host %s", hostname)
-            host_move = get_host_move_tuple(
-                existing_host,
-                host,
-                hostname_field
-            )
+            host_move = get_host_move_tuple(existing_host, host, hostname_field)
             if host_move:  # Else no changes
                 hosts_to_move.append(host_move)
 
-        cmdb_hostnames = set(
-            normalize_hostname(host[hostname_field]) for host in cmdb_hosts
-        )
+        cmdb_hostnames = set(normalize_hostname(host[hostname_field]) for host in cmdb_hosts)
         # API requires this to be a list
         hosts_to_delete = list(set(hosts_managed_by_plugin) - cmdb_hostnames)
 
@@ -1473,17 +1462,16 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             len(hosts_to_delete),
         )
 
-        return hosts_to_create, hosts_to_modify, hosts_to_delete, hosts_to_move
+        return hosts_to_create, hosts_to_modify, hosts_to_delete, hosts_to_move  # type: ignore[return-value]
 
-    def _process_folders(self, hosts: List[dict]):
+    def _process_folders(self, hosts: List[dict]):  # type: ignore[no-untyped-def]
         # Folders are represented as a string.
         # Paths for the HTTP API are written Unix style without prefixed slash: 'folder/subfolder'
         # When using the REST API they have to be '/folder/subfolder'
         # We let the API client decide how the folders should be formatted.
         host_folders = self._api_client.get_folders_from_new_hosts(hosts)
         self._logger.debug(
-            "Found the following folders from missing or to be moved hosts: %s",
-            host_folders
+            "Found the following folders from missing or to be moved hosts: %s", host_folders
         )
         existing_folders = self._api_client.get_folders()
         self._logger.debug("Existing folders: %s", existing_folders)
@@ -1511,7 +1499,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
 
         return created_folders
 
-    def _wait_for_folders(self, folders: List[str]):
+    def _wait_for_folders(self, folders: List[str]):  # type: ignore[no-untyped-def]
         self._logger.debug("Waiting for folders to be created")
         timeout = 60  # seconds
         interval = 2  # seconds
@@ -1524,7 +1512,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             return bool(missing_folders)
 
         def get_duration() -> int:
-            return time.time() - start
+            return int(time.time() - start)
 
         while are_folders_missing() and get_duration() < timeout:
             time.sleep(interval)
@@ -1561,7 +1549,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
 
         return result["succeeded_hosts"]
 
-    def _discover_hosts(self, host_names_to_discover: List[str]):
+    def _discover_hosts(self, host_names_to_discover: List[str]):  # type: ignore[no-untyped-def]
         self._logger.debug(
             "Discovering services on %i hosts (%s)",
             len(host_names_to_discover),
@@ -1580,7 +1568,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             return self._api_client.is_discovery_running() is False
 
         def get_duration() -> int:
-            return time.time() - start
+            return int(time.time() - start)
 
         while not discovery_stopped() and get_duration() < timeout:
             time.sleep(interval)
@@ -1591,9 +1579,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                 timeout,
             )
         else:
-            self._logger.debug(
-                "Bulk discovery finished after %0.2f seconds", get_duration()
-            )
+            self._logger.debug("Bulk discovery finished after %0.2f seconds", get_duration())
 
     def _modify_existing_hosts(self, hosts_to_modify: List[tuple]) -> List[str]:
         """
@@ -1618,7 +1604,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             ", ".join(h[0] for h in hosts_to_move),
         )
         succeeded = []
-        for (host, path) in hosts_to_move:
+        for host, path in hosts_to_move:
             result, error = self._api_client.move_host(host, path)
 
             if result:
@@ -1694,6 +1680,12 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
 
         return changes_activated
 
+    def _get_site_changes(self, phase1_result: Phase1Result) -> None:
+        """Intentionally raise exception
+        """
+        raise NotImplementedError()
+
+
 
 class TagMatcher:
     """
@@ -1727,9 +1719,7 @@ class TagMatcher:
         except KeyError as kerr:
             raise ValueError(f"No matching tag for {name!r} found!") from kerr
 
-    def is_possible_value(
-        self, tag: str, value: str, raise_error: bool = False
-    ) -> bool:
+    def is_possible_value(self, tag: str, value: str, raise_error: bool = False) -> bool:
         "Check if the value is possible for the given tag"
 
         tag = self.get_tag(tag)
@@ -1745,9 +1735,7 @@ class TagMatcher:
         return match_found
 
 
-def generate_path_from_labels(
-    labels: dict, keys: List[str], depth: int = 0
-) -> List[str]:
+def generate_path_from_labels(labels: dict, keys: List[str], depth: int = 0) -> List[str]:
     "Generate a path from the given labels"
     if not labels:
         if not depth:
@@ -1762,7 +1750,7 @@ def generate_path_from_labels(
     return path
 
 
-class FileConnectorHosts:
+class FileConnectorHosts(ConnectorObject):
     "Class used for exchanging data between different stages"
 
     def __init__(self, hosts: List[dict], hostname_field: str, fieldnames: List[str]):
@@ -1771,11 +1759,9 @@ class FileConnectorHosts:
         self.fieldnames = fieldnames
 
     @classmethod
-    def from_serialized_attributes(cls, serialized: dict):
+    def from_serialized_attributes(cls, serialized: dict):  # type: ignore[no-untyped-def]
         "Generate an instance from serialized attributes"
-        return cls(
-            serialized["hosts"], serialized["hostname_field"], serialized["fieldnames"]
-        )
+        return cls(serialized["hosts"], serialized["hostname_field"], serialized["fieldnames"])
 
     def _serialize_attributes(self) -> dict:
         "Serialize class attributes"
