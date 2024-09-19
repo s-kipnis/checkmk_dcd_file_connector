@@ -45,6 +45,12 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple  # pylint: disable
 
 from cmk.ccc.i18n import _  # pylint: disable=import-error
 
+from cmk.utils.global_ident_type import GlobalIdent
+
+from cmk.cee.dcd.config import (  # noqa: F401 # pylint: disable=unused-import,import-error
+    connector_config_registry,
+    ConnectorConfig,
+)
 from cmk.cee.dcd.connector_backend import (
     Connector,
     connector_registry,
@@ -52,14 +58,7 @@ from cmk.cee.dcd.connector_backend import (
     NullObject,
     Phase1Result,
 )
-from cmk.cee.dcd.config import (  # noqa: F401 # pylint: disable=unused-import,import-error
-    connector_config_registry,
-    ConnectorConfig,
-)
-
-
 from cmk.cee.dcd.site_api import MKAPIError  # pylint: disable=import-error
-from cmk.utils.global_ident_type import GlobalIdent
 
 try:
     from functools import cache  # pylint: disable=ungrouped-imports
@@ -232,45 +231,23 @@ class FileConnectorConfig(ConnectorConfig):  # pylint: disable=too-few-public-me
         }
 
     def _connector_attributes_from_config(self, connector_cfg: dict) -> None:
-        self.interval: int = connector_cfg[
-            "interval"
-        ]  # pylint: disable=attribute-defined-outside-init
+        self.interval: int = connector_cfg["interval"]  # pylint: disable=attribute-defined-outside-init
         self.path: str = connector_cfg["path"]  # pylint: disable=attribute-defined-outside-init
-        self.file_format: str = connector_cfg.get(
-            "file_format", "csv"
-        )  # pylint: disable=attribute-defined-outside-init
+        self.file_format: str = connector_cfg.get("file_format", "csv")  # pylint: disable=attribute-defined-outside-init
         self.folder: str = connector_cfg["folder"]  # pylint: disable=attribute-defined-outside-init
-        self.lowercase_everything: bool = connector_cfg.get(
-            "lowercase_everything", False
-        )  # pylint: disable=attribute-defined-outside-init
-        self.replace_special_chars: bool = connector_cfg.get(
-            "replace_special_chars", False
-        )  # pylint: disable=attribute-defined-outside-init
-        self.host_filters: List[str] = connector_cfg.get(
-            "host_filters", []
-        )  # pylint: disable=attribute-defined-outside-init
-        self.host_overtake_filters: List[str] = (
-            connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
-                "host_overtake_filters", []
-            )
+        self.lowercase_everything: bool = connector_cfg.get("lowercase_everything", False)  # pylint: disable=attribute-defined-outside-init
+        self.replace_special_chars: bool = connector_cfg.get("replace_special_chars", False)  # pylint: disable=attribute-defined-outside-init
+        self.host_filters: List[str] = connector_cfg.get("host_filters", [])  # pylint: disable=attribute-defined-outside-init
+        self.host_overtake_filters: List[str] = connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
+            "host_overtake_filters", []
         )
-        self.chunk_size: int = connector_cfg.get(
-            "chunk_size", 0
-        )  # pylint: disable=attribute-defined-outside-init
-        self.use_service_discovery: bool = (
-            connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
-                "use_service_discovery", True
-            )
+        self.chunk_size: int = connector_cfg.get("chunk_size", 0)  # pylint: disable=attribute-defined-outside-init
+        self.use_service_discovery: bool = connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
+            "use_service_discovery", True
         )
-        self.label_path_template: str = connector_cfg.get(
-            "label_path_template", ""
-        )  # pylint: disable=attribute-defined-outside-init
-        self.csv_delimiter: Optional[str] = connector_cfg.get(
-            "csv_delimiter"
-        )  # pylint: disable=attribute-defined-outside-init
-        self.label_prefix: Optional[str] = connector_cfg.get(
-            "label_prefix"
-        )  # pylint: disable=attribute-defined-outside-init
+        self.label_path_template: str = connector_cfg.get("label_path_template", "")  # pylint: disable=attribute-defined-outside-init
+        self.csv_delimiter: Optional[str] = connector_cfg.get("csv_delimiter")  # pylint: disable=attribute-defined-outside-init
+        self.label_prefix: Optional[str] = connector_cfg.get("label_prefix")  # pylint: disable=attribute-defined-outside-init
 
 
 class FileImporter(ABC):  # pylint: disable=too-few-public-methods
@@ -1019,9 +996,7 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
             )
 
         with self.status.next_step("phase2_fetch_hosts", _("Phase 2.2: Fetching existing hosts")):
-            self._api_client = (
-                self._get_api_client()
-            )  # pylint: disable=attribute-defined-outside-init
+            self._api_client = self._get_api_client()  # pylint: disable=attribute-defined-outside-init
 
             cmk_hosts = self._api_client.get_hosts()
 
@@ -1681,10 +1656,8 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
         return changes_activated
 
     def _get_site_changes(self, phase1_result: Phase1Result) -> None:
-        """Intentionally raise exception
-        """
+        """Intentionally raise exception"""
         raise NotImplementedError()
-
 
 
 class TagMatcher:
@@ -1728,8 +1701,9 @@ class TagMatcher:
 
         if raise_error and not match_found:
             raise ValueError(
-                f"{value!r} is no possible choice for tag {tag}. "
-                "Valid tags are: {}".format(", ".join(values))
+                f"{value!r} is no possible choice for tag {tag}. " "Valid tags are: {}".format(
+                    ", ".join(values)
+                )
             )
 
         return match_found
