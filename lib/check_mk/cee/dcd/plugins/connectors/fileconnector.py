@@ -35,28 +35,28 @@ File Connector import logic.
 """
 
 import csv
+import dataclasses
 import json
 import re
 import time
 from abc import ABC, abstractmethod
 from functools import partial, wraps
 from itertools import zip_longest
-from typing import Dict, Iterable, List, Optional, Set, Tuple  # pylint: disable=unused-import
+from typing import Dict, Iterable, List, Optional, Self, Set, Tuple
 
 from cmk.ccc.i18n import _  # pylint: disable=import-error
 
 from cmk.utils.global_ident_type import GlobalIdent
 
-from cmk.cee.dcd.config import (  # noqa: F401 # pylint: disable=unused-import,import-error
-    connector_config_registry,
-    ConnectorConfig,
+from cmk.cee.dcd.config import ConnectorConfigModel
+from cmk.cee.dcd.connector_api import (
+    ConnectorObject,
+    Phase1Result,
 )
 from cmk.cee.dcd.connector_backend import (
     Connector,
     connector_registry,
-    ConnectorObject,
     NullObject,
-    Phase1Result,
 )
 from cmk.cee.dcd.site_api import MKAPIError  # pylint: disable=import-error
 
@@ -205,49 +205,50 @@ def create_hostlike_tags(tags_from_cmk: dict) -> Dict[str, List[str]]:
     return {"tag_" + tag["id"]: [choice["id"] for choice in tag["tags"]] for tag in tags_from_cmk}
 
 
-@connector_config_registry.register
-class FileConnectorConfig(ConnectorConfig):  # pylint: disable=too-few-public-methods
+@dataclasses.dataclass
+class FileConnectorConfig:
     """Loading the persisted connection config"""
+
+    site: str
+    disabled: bool
+    interval: int
+    path: str
+    file_format: str
+    folder: str
+    lowercase_everything: bool
+    replace_special_chars: bool
+    host_filters: List[str]
+    host_overtake_filters: List[str]
+    chunk_size: int
+    use_service_discovery: bool
+    label_path_template: str
+    csv_delimiter: str | None
+    label_prefix: str | None
 
     @classmethod
     def name(cls) -> str:  # pylint: disable=missing-function-docstring
         return "fileconnector"
 
-    def _connector_attributes_to_config(self) -> dict:
-        return {
-            "interval": self.interval,
-            "path": self.path,
-            "file_format": self.file_format,
-            "folder": self.folder,
-            "lowercase_everything": self.lowercase_everything,
-            "replace_special_chars": self.replace_special_chars,
-            "host_filters": self.host_filters,
-            "host_overtake_filters": self.host_overtake_filters,
-            "chunk_size": self.chunk_size,
-            "use_service_discovery": self.use_service_discovery,
-            "label_path_template": self.label_path_template,
-            "csv_delimiter": self.csv_delimiter,
-            "label_prefix": self.label_prefix,
-        }
-
-    def _connector_attributes_from_config(self, connector_cfg: dict) -> None:
-        self.interval: int = connector_cfg["interval"]  # pylint: disable=attribute-defined-outside-init
-        self.path: str = connector_cfg["path"]  # pylint: disable=attribute-defined-outside-init
-        self.file_format: str = connector_cfg.get("file_format", "csv")  # pylint: disable=attribute-defined-outside-init
-        self.folder: str = connector_cfg["folder"]  # pylint: disable=attribute-defined-outside-init
-        self.lowercase_everything: bool = connector_cfg.get("lowercase_everything", False)  # pylint: disable=attribute-defined-outside-init
-        self.replace_special_chars: bool = connector_cfg.get("replace_special_chars", False)  # pylint: disable=attribute-defined-outside-init
-        self.host_filters: List[str] = connector_cfg.get("host_filters", [])  # pylint: disable=attribute-defined-outside-init
-        self.host_overtake_filters: List[str] = connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
-            "host_overtake_filters", []
+    @classmethod
+    def load(cls, all_cfg: ConnectorConfigModel) -> Self:
+        connector_cfg = all_cfg.connector.config
+        return cls(
+            site=all_cfg.site,
+            disabled=all_cfg.disabled,
+            interval=connector_cfg["interval"],
+            path=connector_cfg["path"],
+            file_format=connector_cfg.get("file_format", "csv"),
+            folder=connector_cfg["folder"],
+            lowercase_everything=connector_cfg.get("lowercase_everything", False),
+            replace_special_chars=connector_cfg.get("replace_special_chars", False),
+            host_filters=connector_cfg.get("host_filters", []),
+            host_overtake_filters=connector_cfg.get("host_overtake_filters", []),
+            chunk_size=connector_cfg.get("chunk_size", 0),
+            use_service_discovery=connector_cfg.get("use_service_discovery", True),
+            label_path_template=connector_cfg.get("label_path_template", ""),
+            csv_delimiter=connector_cfg.get("csv_delimiter"),
+            label_prefix=connector_cfg.get("label_prefix"),
         )
-        self.chunk_size: int = connector_cfg.get("chunk_size", 0)  # pylint: disable=attribute-defined-outside-init
-        self.use_service_discovery: bool = connector_cfg.get(  # pylint: disable=attribute-defined-outside-init
-            "use_service_discovery", True
-        )
-        self.label_path_template: str = connector_cfg.get("label_path_template", "")  # pylint: disable=attribute-defined-outside-init
-        self.csv_delimiter: Optional[str] = connector_cfg.get("csv_delimiter")  # pylint: disable=attribute-defined-outside-init
-        self.label_prefix: Optional[str] = connector_cfg.get("label_prefix")  # pylint: disable=attribute-defined-outside-init
 
 
 class FileImporter(ABC):  # pylint: disable=too-few-public-methods
@@ -1033,6 +1034,10 @@ class FileConnector(Connector):  # pylint: disable=too-few-public-methods
                     step.finish(_("Not activated"))
             else:
                 step.finish(_("No activation needed"))
+
+    def load_config(self, config: ConnectorConfigModel) -> None:
+        """Load the configuration for this connection"""
+        self._connection_config = FileConnectorConfig.load(config)
 
     def _get_api_client(self):
         "Get a preconfigured API client"
