@@ -51,12 +51,12 @@ from cmk.utils.global_ident_type import GlobalIdent
 from cmk.cee.dcd.config import ConnectorConfigModel
 from cmk.cee.dcd.connector_api import (
     ConnectorObject,
+    NullObject,
     Phase1Result,
 )
 from cmk.cee.dcd.connector_backend import (
     Connector,
     connector_registry,
-    NullObject,
 )
 from cmk.cee.dcd.site_api import MKAPIError  # pylint: disable=import-error
 
